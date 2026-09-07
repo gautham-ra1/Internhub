@@ -1,0 +1,160 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+
+// Data & Utils
+import { CREAM, ANIMATION_STYLES, CANDIDATE, JOBS, FEATURED_JOB_ID, PAGE_SIZE } from './config/constants';
+import { fetchLiveJobs } from './utils/apiHelpers';
+import { computeMatchScore } from './utils/scoring';
+
+// Components
+import { DecorativeBlobs, Header, Hero, SearchBar, FilterChips, InternshipToggle, EmptyState, LiveFeedNotice, LoadMoreButton, CTAButton, Footer } from './components/SharedUI';
+import JobCard from './components/JobCard';
+import MatchingPanel from './components/MatchingPanel';
+
+export default function InternHubApp() {
+  const [liveJobs, setLiveJobs] = useState([]);
+  const [isLoadingLive, setIsLoadingLive] = useState(true);
+  const [liveFeedError, setLiveFeedError] = useState(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [internshipOnly, setInternshipOnly] = useState(false);
+  const [showAllJobs, setShowAllJobs] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [expandedCardIds, setExpandedCardIds] = useState(() => new Set());
+  const [isPanelExpanded, setIsPanelExpanded] = useState(false);
+  const [isNavOpen, setIsNavOpen] = useState(false);
+  const [barWidth, setBarWidth] = useState(0);
+
+  const gridRef = useRef(null);
+  const navRef = useRef(null);
+
+  const featuredJob = JOBS.find((j) => j.id === FEATURED_JOB_ID);
+  const featuredMatch = computeMatchScore(CANDIDATE, featuredJob);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLiveJobs()
+      .then((normalized) => {
+        if (!cancelled) {
+          setLiveJobs(normalized);
+          setIsLoadingLive(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLiveFeedError(err.message || 'network error');
+          setIsLoadingLive(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setBarWidth(featuredMatch.total), 400);
+    return () => clearTimeout(t);
+  }, [featuredMatch.total]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (navRef.current && !navRef.current.contains(e.target)) setIsNavOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [activeFilter, searchQuery, internshipOnly, showAllJobs]);
+
+  const combinedJobs = useMemo(() => JOBS.concat(liveJobs), [liveJobs]);
+  const aiRelevantCount = useMemo(() => combinedJobs.filter((j) => j.category !== 'Other').length, [combinedJobs]);
+
+  const filteredJobs = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return combinedJobs.filter((job) => {
+      const matchesFilter =
+        activeFilter === 'All' || (activeFilter === 'Remote' ? job.workMode === 'remote' : job.category === activeFilter);
+      const matchesInternship = !internshipOnly || job.jobType === 'Internship';
+      const matchesSearch =
+        q === '' ||
+        job.title.toLowerCase().includes(q) ||
+        job.company.toLowerCase().includes(q) ||
+        job.category.toLowerCase().includes(q) ||
+        job.workMode.toLowerCase().includes(q) ||
+        job.locationLabel.toLowerCase().includes(q) ||
+        job.requiredSkills.some((s) => s.toLowerCase().includes(q)) ||
+        job.preferredSkills.some((s) => s.toLowerCase().includes(q));
+      return matchesFilter && matchesInternship && matchesSearch;
+    });
+  }, [combinedJobs, activeFilter, internshipOnly, searchQuery]);
+
+  const isDefaultView = activeFilter === 'All' && searchQuery.trim() === '' && !showAllJobs && !internshipOnly;
+  const visibleJobs = isDefaultView ? filteredJobs.slice(0, 3) : filteredJobs.slice(0, visibleCount);
+  const hasMore = !isDefaultView && visibleCount < filteredJobs.length;
+  const gridKey = `${activeFilter}-${searchQuery}-${internshipOnly}`;
+
+  function toggleCard(id) {
+    setExpandedCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleSeeAll() {
+    setActiveFilter('All');
+    setSearchQuery('');
+    setShowAllJobs(true);
+    requestAnimationFrame(() => {
+      gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function handleSearchSubmit() {
+    gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  return (
+    <div className="min-h-screen relative" style={{ backgroundColor: CREAM }}>
+      <style>{ANIMATION_STYLES}</style>
+      <DecorativeBlobs />
+
+      <div className="relative z-10 max-w-6xl mx-auto px-6 sm:px-10 pt-8 pb-16 font-body">
+        <Header isNavOpen={isNavOpen} onToggleNav={() => setIsNavOpen((v) => !v)} navRef={navRef} />
+        <Hero liveCount={aiRelevantCount} isLoadingLive={isLoadingLive} />
+
+        <SearchBar query={searchQuery} onQueryChange={setSearchQuery} onSubmit={handleSearchSubmit} />
+        <FilterChips active={activeFilter} onSelect={setActiveFilter} />
+        <InternshipToggle active={internshipOnly} onToggle={() => setInternshipOnly((v) => !v)} />
+
+        <div ref={gridRef}>
+          <LiveFeedNotice error={liveFeedError} />
+          {visibleJobs.length === 0 ? (
+            <EmptyState isLoadingLive={isLoadingLive} />
+          ) : (
+            <div key={gridKey} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
+              {visibleJobs.map((job, i) => (
+                <JobCard key={job.id} job={job} index={i} isExpanded={expandedCardIds.has(job.id)} onToggle={toggleCard} />
+              ))}
+            </div>
+          )}
+          {hasMore && <LoadMoreButton onClick={() => setVisibleCount((v) => v + PAGE_SIZE)} remaining={filteredJobs.length - visibleCount} />}
+        </div>
+
+        <MatchingPanel
+          job={featuredJob}
+          matchResult={featuredMatch}
+          isExpanded={isPanelExpanded}
+          onToggle={() => setIsPanelExpanded((v) => !v)}
+          barWidth={barWidth}
+        />
+
+        <CTAButton onClick={handleSeeAll} count={combinedJobs.length} />
+        <Footer />
+      </div>
+    </div>
+  );
+}
