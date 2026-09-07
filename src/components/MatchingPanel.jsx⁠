@@ -1,0 +1,52 @@
+import { ChevronDown } from 'lucide-react';
+import { NAVY, PINK } from '../config/constants';
+import { generateExplanation } from '../utils/scoring';
+
+export default function MatchingPanel({ job, matchResult, isExpanded, onToggle, barWidth }) {
+  const explanation = generateExplanation(job, matchResult);
+  return (
+    <section className="soft-fade rounded-3xl p-6 sm:p-8 mb-6" style={{ backgroundColor: NAVY }}>
+      <button type="button" onClick={onToggle} aria-expanded={isExpanded} className="w-full flex items-start justify-between gap-4 text-left focus:outline-none">
+        <div>
+          <p className="text-xs font-semibold tracking-widest uppercase text-white text-opacity-50 mb-2">Matching for you</p>
+          <p className="font-display font-semibold text-xl sm:text-2xl text-white">
+            {matchResult.total}% fit · {job.title}
+          </p>
+        </div>
+        <ChevronDown
+          size={22}
+          className={`text-white text-opacity-70 shrink-0 mt-1 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      <div className="h-2 rounded-full bg-white bg-opacity-10 overflow-hidden mt-5">
+        <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${barWidth}%`, backgroundColor: PINK }} />
+      </div>
+
+      <div className={`overflow-hidden transition-all duration-500 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-6' : 'max-h-0 opacity-0'}`}>
+        <div className="space-y-3">
+          {matchResult.parts.map((part) => (
+            <div key={part.label}>
+              <div className="flex items-center justify-between text-sm text-white mb-1">
+                <span className="text-white text-opacity-80">{part.label}</span>
+                <span className="font-semibold">
+                  {part.score}/{part.max}
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white bg-opacity-10 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-white bg-opacity-70 transition-all duration-700 ease-out"
+                  style={{ width: `${(part.score / part.max) * 100}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-sm text-white text-opacity-70 leading-relaxed mt-5">{explanation}</p>
+        <p className="text-xs text-white text-opacity-40 mt-3 italic">
+          A weighted ranking signal from the factors above — not a probability of acceptance.
+        </p>
+      </div>
+    </section>
+  );
+}
