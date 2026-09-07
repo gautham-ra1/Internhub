@@ -1,0 +1,88 @@
+import { formatStipend } from './apiHelpers';
+
+const SKILL_WEIGHTS = { required: 25, preferred: 10 };
+const LOCATION_MAX = 20;
+const JOB_TYPE_MAX = 20;
+const EXPERIENCE_MAX = 15;
+const FRESHNESS_MAX = 10;
+const EXPERIENCE_ORDER = { entry: 0, intermediate: 1, advanced: 2 };
+const EXPERIENCE_TABLE = { 0: 15, 1: 10, 2: 4 };
+
+export function skillsOverlap(candidateSkills, skillList) {
+  const norm = (s) => s.toLowerCase().trim();
+  return skillList.filter((skill) =>
+    candidateSkills.some((cs) => {
+      const a = norm(cs);
+      const b = norm(skill);
+      return a === b || a.includes(b) || b.includes(a);
+    })
+  );
+}
+
+export function computeSkillsScore(candidate, job) {
+  const matchedRequired = skillsOverlap(candidate.skills, job.requiredSkills);
+  const matchedPreferred = skillsOverlap(candidate.skills, job.preferredSkills);
+  const requiredRatio = job.requiredSkills.length ? matchedRequired.length / job.requiredSkills.length : 0;
+  const preferredRatio = job.preferredSkills.length ? matchedPreferred.length / job.preferredSkills.length : 0;
+  const score = Math.round(requiredRatio * SKILL_WEIGHTS.required + preferredRatio * SKILL_WEIGHTS.preferred);
+  return {
+    label: 'Skills',
+    score,
+    max: SKILL_WEIGHTS.required + SKILL_WEIGHTS.preferred,
+    matchedRequired,
+    missingRequired: job.requiredSkills.filter((s) => !matchedRequired.includes(s)),
+  };
+}
+
+export function computeLocationScore(candidate, job) {
+  let score;
+  if (candidate.preferredWorkModes.includes(job.workMode)) score = LOCATION_MAX;
+  else if (job.workMode === 'hybrid') score = 12;
+  else score = 4;
+  return { label: 'Location & Work Mode', score, max: LOCATION_MAX };
+}
+
+export function computeJobTypeScore(candidate, job) {
+  const score = candidate.preferredJobTypes.includes(job.jobType) ? JOB_TYPE_MAX : Math.round(JOB_TYPE_MAX * 0.4);
+  return { label: 'Job Type', score, max: JOB_TYPE_MAX };
+}
+
+export function computeExperienceScore(candidate, job) {
+  const dist = Math.abs(EXPERIENCE_ORDER[candidate.experienceLevel] - EXPERIENCE_ORDER[job.experienceLevel]);
+  return { label: 'Experience', score: EXPERIENCE_TABLE[dist] ?? 0, max: EXPERIENCE_MAX };
+}
+
+export function computeFreshnessScore(job) {
+  const raw = FRESHNESS_MAX * Math.exp(-job.postedDaysAgo / 14);
+  return { label: 'Freshness', score: Math.max(0, Math.min(FRESHNESS_MAX, Math.round(raw))), max: FRESHNESS_MAX };
+}
+
+export function computeMatchScore(candidate, job) {
+  const parts = [
+    computeSkillsScore(candidate, job),
+    computeLocationScore(candidate, job),
+    computeJobTypeScore(candidate, job),
+    computeExperienceScore(candidate, job),
+    computeFreshnessScore(job),
+  ];
+  return {
+    total: parts.reduce((sum, p) => sum + p.score, 0),
+    maxTotal: parts.reduce((sum, p) => sum + p.max, 0),
+    parts,
+  };
+}
+
+export function generateExplanation(job, matchResult) {
+  const skillsPart = matchResult.parts[0];
+  const sentences = [];
+  if (skillsPart.matchedRequired.length) {
+    sentences.push(`You already match on ${skillsPart.matchedRequired.join(' and ')}.`);
+  }
+  sentences.push(
+    `${job.company} is ${job.workMode === 'remote' ? 'fully remote' : job.workMode}, runs ${job.duration}, and pays ${formatStipend(job.stipend)}.`
+  );
+  if (skillsPart.missingRequired.length) {
+    sentences.push(`Brushing up on ${skillsPart.missingRequired.join(' and ')} would strengthen this further.`);
+  }
+  return sentences.join(' ');
+}
